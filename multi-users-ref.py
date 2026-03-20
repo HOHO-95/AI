@@ -9,12 +9,50 @@ from dotenv import load_dotenv
 from supabase import Client, create_client
 
 
+def _find_ref_path() -> Path:
+    """
+    Streamlit Cloud에서는 앱 파일이 다른 경로로 마운트될 수 있습니다.
+    그래서 같은 폴더에 없으면 상위/리포지토리 내부에서 `multi-session-ref.py`를 찾아 로드합니다.
+    """
+    this_file = Path(__file__).resolve()
+
+    # 1) 같은 폴더
+    p = this_file.parent / "multi-session-ref.py"
+    if p.exists():
+        return p
+
+    # 2) 상위 폴더 일부에 대해 흔한 위치 + 전체 rglob
+    #    rglob은 fallback 성격이라, 경로를 조금만 줄여 사용합니다.
+    for up in range(1, 7):
+        root = this_file.parents[up - 1]
+
+        # 흔한 경로(프로젝트 구조)
+        candidates = [
+            root / "7.MultiService" / "code" / "multi-session-ref.py",
+            root / "7.MultiService" / "code" / "multi-session-ref.py",
+            root / "multi-session-ref.py",
+        ]
+        for c in candidates:
+            if c.exists():
+                return c
+
+        # 그래도 없으면 해당 root 아래에서만 이름으로 탐색
+        try:
+            matches = list(root.rglob("multi-session-ref.py"))
+            if matches:
+                # 첫 매치 하나만 사용
+                return matches[0]
+        except Exception:
+            # 탐색 실패는 다음 root로 넘어갑니다.
+            continue
+
+    raise FileNotFoundError("multi-session-ref.py를 찾지 못했습니다. 리포지토리에 해당 파일이 포함되어 있는지 확인해 주세요.")
+
+
 def _load_ref_module() -> Any:
-    """
-    기존 `multi-session-ref.py`를 코드 복붙 없이 재사용하기 위해 동적 로드합니다.
-    """
-    ref_path = Path(__file__).resolve().parent / "multi-session-ref.py"
-    spec = importlib.util.spec_from_file_location("multi_session_ref", ref_path)
+    """기존 `multi-session-ref.py`를 코드 복붙 없이 재사용하기 위해 동적 로드합니다."""
+    ref_path = _find_ref_path()
+    spec = importlib.util.spec_from_file_location("multi_session_ref", str(ref_path))
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to load ref module: {ref_path}")
     mod = importlib.util.module_from_spec(spec)
@@ -22,7 +60,12 @@ def _load_ref_module() -> Any:
     return mod
 
 
-ref = _load_ref_module()
+try:
+    ref = _load_ref_module()
+except FileNotFoundError as e:
+    # Streamlit Cloud에서 로그는 제한될 수 있으니 화면에도 안내합니다.
+    st.error(str(e))
+    st.stop()
 
 
 def render_header() -> None:
@@ -426,5 +469,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-
-# test
